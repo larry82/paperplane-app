@@ -41,6 +41,7 @@ dependencies:
   get: any
   provider: ^6.0.0
   shared_preferences: ^2.0.8
+  lig_scanner_sdk: ^0.5.0+1
   flutter_launcher_icons:
 
   # The following adds the Cupertino Icons font to your application.

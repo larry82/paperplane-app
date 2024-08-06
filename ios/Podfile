@@ -1,5 +1,12 @@
+# CDN 配置
+source 'https://cdn.cocoapods.org/'
+
+# 添加 GitLab 私有仓
+source 'https://gitlab.com/lig-corp/pod-spec.git'
+
 # Uncomment this line to define a global platform for your project
 platform :ios, '13.0'
+
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -35,6 +42,8 @@ target 'Runner' do
   target 'RunnerTests' do
     inherit! :search_paths
   end
+
+  pod 'LiGScannerKit', '4.0.1'
 end
 
 post_install do |installer|

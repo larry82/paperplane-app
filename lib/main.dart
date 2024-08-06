@@ -6,6 +6,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:lig_scanner_sdk/lig_scanner_sdk.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,18 +32,18 @@ class UserState extends ChangeNotifier {
   UserProfile? _userProfile;
   String? _userEmail;
   AccessToken? _accessToken;
-  String? _userId; // 新增 User ID 欄位
+  String? _userId;
 
   UserProfile? get userProfile => _userProfile;
   String? get userEmail => _userEmail;
   AccessToken? get accessToken => _accessToken;
-  String? get userId => _userId; // 新增 getter
+  String? get userId => _userId;
 
   void setUser(UserProfile profile, String? email, AccessToken token) {
     _userProfile = profile;
     _userEmail = email;
     _accessToken = token;
-    _userId = profile.userId; // 設置 User ID
+    _userId = profile.userId;
     notifyListeners();
   }
 
@@ -47,7 +51,7 @@ class UserState extends ChangeNotifier {
     _userProfile = null;
     _userEmail = null;
     _accessToken = null;
-    _userId = null; // 清除 User ID
+    _userId = null;
     notifyListeners();
   }
 
@@ -57,7 +61,7 @@ class UserState extends ChangeNotifier {
     _userProfile = null;
     _userEmail = null;
     _accessToken = null;
-    _userId = null; // 重置 User ID
+    _userId = null;
     notifyListeners();
   }
 }
@@ -123,9 +127,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> resetAppState() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // 清除所有保存的偏好設置
+    await prefs.clear();
 
-    // 重置所有狀態到默認值
     _isFirstLaunch = true;
     _tutorialCompleted = false;
     _authCompleted = false;
@@ -163,26 +166,15 @@ class AppRouter extends StatelessWidget {
     final userState = Provider.of<UserState>(context);
 
     if (!userState.isLoggedIn) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _signIn(context);
+      });
       return LoginPage();
     } else if (!appState.tutorialCompleted) {
       return TutorialPage();
     } else {
       return MainScreen();
     }
-  }
-}
-
-class LoginPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: ElevatedButton(
-          child: Text('LINE 登入'),
-          onPressed: () => _signIn(context),
-        ),
-      ),
-    );
   }
 
   void _signIn(BuildContext context) async {
@@ -197,13 +189,37 @@ class LoginPage extends StatelessWidget {
       );
       Provider.of<AppState>(context, listen: false).setFirstLaunch(false);
       Provider.of<AppState>(context, listen: false).saveAppState();
-      Navigator.of(context)
-          .pushReplacement(MaterialPageRoute(builder: (_) => TutorialPage()));
+
+      if (Provider.of<AppState>(context, listen: false).tutorialCompleted) {
+        Navigator.of(context)
+            .pushReplacement(MaterialPageRoute(builder: (_) => MainScreen()));
+      } else {
+        Navigator.of(context)
+            .pushReplacement(MaterialPageRoute(builder: (_) => TutorialPage()));
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('登入失敗: $e')),
       );
     }
+  }
+}
+
+class LoginPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('正在登入...'),
+            SizedBox(height: 20),
+            CircularProgressIndicator(),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -327,22 +343,14 @@ class TutorialPageContent extends StatelessWidget {
 }
 
 class MainScreen extends StatefulWidget {
-  final int initialIndex;
-
-  MainScreen({Key? key, this.initialIndex = 0}) : super(key: key);
+  MainScreen({Key? key}) : super(key: key);
 
   @override
   _MainScreenState createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
-  late int _selectedIndex;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedIndex = widget.initialIndex;
-  }
+  int _selectedIndex = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -354,15 +362,15 @@ class _MainScreenState extends State<MainScreen> {
         index: _selectedIndex,
         children: [
           WebViewPage(
-            initialUrl: appState.firstTimeOpeningGuide && userState.isLoggedIn
-                ? 'https://flyingclub.io/webview/auth'
-                : 'https://flyingclub.io/stores?guide=true',
+            initialUrl: 'https://flyingclub.io/webview/auth',
           ),
           QRScannerPage(),
+          ARScannerPage(),
           ProfilePage(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(
             icon: Icon(Icons.local_bar),
@@ -371,6 +379,10 @@ class _MainScreenState extends State<MainScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.qr_code_scanner),
             label: '掃一掃',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.view_in_ar),
+            label: 'AR',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person),
@@ -382,10 +394,6 @@ class _MainScreenState extends State<MainScreen> {
           setState(() {
             _selectedIndex = index;
           });
-          if (index == 0 && appState.firstTimeOpeningGuide) {
-            appState.setFirstTimeOpeningGuide(false);
-            appState.saveAppState();
-          }
         },
       ),
     );
@@ -404,6 +412,7 @@ class WebViewPage extends StatefulWidget {
 class _WebViewPageState extends State<WebViewPage> {
   late WebViewController _controller;
   bool _isLoading = true;
+  bool _hasCompletedAuth = false;
 
   @override
   void initState() {
@@ -414,6 +423,9 @@ class _WebViewPageState extends State<WebViewPage> {
         'Flutter',
         onMessageReceived: (JavaScriptMessage message) {
           print('Message from Web App: ${message.message}');
+          if (message.message == 'login_required') {
+            _reLogin();
+          }
         },
       )
       ..setNavigationDelegate(
@@ -423,6 +435,11 @@ class _WebViewPageState extends State<WebViewPage> {
               _isLoading = false;
             });
             _injectUserData();
+            if (!_hasCompletedAuth &&
+                url.contains('flyingclub.io/webview/auth')) {
+              _hasCompletedAuth = true;
+              _navigateToGuide();
+            }
           },
         ),
       )
@@ -433,18 +450,16 @@ class _WebViewPageState extends State<WebViewPage> {
     final userState = Provider.of<UserState>(context, listen: false);
     final appState = Provider.of<AppState>(context, listen: false);
     if (userState.isLoggedIn && userState.accessToken != null) {
-      final accessToken = userState.accessToken!.data['access_token']
-          as String; // 只獲取 access_token 值
+      final accessToken = userState.accessToken!.data['access_token'] as String;
       final name = userState.userProfile?.displayName ?? '';
       final email = userState.userEmail ?? '';
-      final userId = userState.userId ?? ''; // 獲取 User ID
+      final userId = userState.userId ?? '';
 
       final script = '''
         window.localStorage.setItem('line_access_token', '$accessToken');
         window.localStorage.setItem('line_name', '$name');
         window.localStorage.setItem('line_email', '$email');
-        window.localStorage.setItem('line_user_id', '$userId');  // 存儲 User ID
-        
+        window.localStorage.setItem('line_user_id', '$userId');
       ''';
       _controller.runJavaScript(script).then((_) {
         print('User data injected successfully');
@@ -457,6 +472,18 @@ class _WebViewPageState extends State<WebViewPage> {
       appState.setAuthCompleted(true);
       appState.saveAppState();
     }
+  }
+
+  void _reLogin() {
+    final userState = Provider.of<UserState>(context, listen: false);
+    userState.clearUser();
+    Navigator.of(context)
+        .pushReplacement(MaterialPageRoute(builder: (_) => LoginPage()));
+  }
+
+  void _navigateToGuide() {
+    _controller
+        .loadRequest(Uri.parse('https://flyingclub.io/stores?guide=true'));
   }
 
   void _navigateToAuth() {
@@ -554,38 +581,79 @@ class _QRScannerPageState extends State<QRScannerPage> {
     });
   }
 
-  void _handleQRCode(String code) async {
-    if (!mounted) return; // 檢查 widget 是否仍然掛載
-
-    if (await canLaunch(code)) {
-      final webViewState = Provider.of<WebViewState>(context, listen: false);
-      webViewState.updateUrl(code);
-
-      // 使用 Navigator.of(context).pushReplacement 而不是 pop
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => MainScreen(initialIndex: 0),
-        ),
-      );
-    } else {
+  void _handleQRCode(String code) {
+    Navigator.of(context)
+        .push(
+      MaterialPageRoute(
+        builder: (context) => QRWebViewPage(url: code),
+      ),
+    )
+        .then((_) {
       if (mounted) {
-        // 再次檢查，因為 canLaunch 是異步的
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('無效的 QR Code')),
-        );
+        controller?.resumeCamera();
       }
-    }
-
-    // 確保相機在組件被卸載後不會繼續運行
-    if (mounted) {
-      controller?.resumeCamera();
-    }
+    });
   }
 
   @override
   void dispose() {
     controller?.dispose();
     super.dispose();
+  }
+}
+
+class QRWebViewPage extends StatefulWidget {
+  final String url;
+
+  QRWebViewPage({required this.url});
+
+  @override
+  _QRWebViewPageState createState() => _QRWebViewPageState();
+}
+
+class _QRWebViewPageState extends State<QRWebViewPage> {
+  late WebViewController _controller;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (String url) {
+            setState(() {
+              _isLoading = false;
+            });
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('掃描結果'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.close),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          WebViewWidget(controller: _controller),
+          if (_isLoading)
+            Center(
+              child: CircularProgressIndicator(),
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -660,7 +728,6 @@ class ProfilePage extends StatelessWidget {
     final appState = Provider.of<AppState>(context, listen: false);
     final userState = Provider.of<UserState>(context, listen: false);
 
-    // 顯示確認對話框
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -685,14 +752,12 @@ class ProfilePage extends StatelessWidget {
       await appState.resetAppState();
       await userState.resetUserState();
 
-      // 登出 LINE SDK
       try {
         await LineSDK.instance.logout();
       } catch (e) {
         print('登出 LINE SDK 時出錯: $e');
       }
 
-      // 重啟應用
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => LoginPage()),
         (Route<dynamic> route) => false,
@@ -747,5 +812,310 @@ class UserInfoWidget extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class ARScannerPage extends StatefulWidget {
+  @override
+  _ARScannerPageState createState() => _ARScannerPageState();
+}
+
+class _ARScannerPageState extends State<ARScannerPage> {
+  final _ligScannerSdkPlugin = LigScannerSdk();
+  static const statusChannel = EventChannel("lig_scanner_sdk_status");
+  static const resultChannel = EventChannel("lig_scanner_sdk_results");
+  bool _supported = false;
+  bool _authenticated = false;
+  Offset _center = const Offset(0.9, 0.85);
+  int _ligTagID = 0;
+
+  final Permission _permission = Permission.camera;
+  PermissionStatus _permissionStatus = PermissionStatus.denied;
+
+  late StreamSubscription _statusSubscription;
+  late StreamSubscription _resultSubscription;
+
+  bool _mounted = true;
+  String _scanStatus = '等待掃描...'; // 新增：掃描狀態
+
+  @override
+  void initState() {
+    super.initState();
+
+    _checkPermission();
+
+    _listenForPermissionStatus();
+
+    _statusSubscription = statusChannel
+        .receiveBroadcastStream()
+        .listen(_onStatusReported, onError: _onChannelError);
+    _resultSubscription = resultChannel
+        .receiveBroadcastStream()
+        .listen(_onResultDelivered, onError: _onChannelError);
+
+    _ligScannerSdkPlugin.initialize(
+        "79AA5-5F64B-2D40F-FE67B-145C3", "D68E2-6ABFE-4AC12-95033-11102");
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    _statusSubscription.cancel();
+    _resultSubscription.cancel();
+    super.dispose();
+  }
+
+  void _listenForPermissionStatus() async {
+    final status = await _permission.status;
+    if (_mounted) {
+      setState(() => _permissionStatus = status);
+    }
+  }
+
+  void _onStatusReported(Object? status) {
+    print('Status reported: $status');
+    if (status == null || !_mounted) {
+      return;
+    }
+
+    if (status is! int) {
+      return;
+    }
+
+    switch (status) {
+      case 17: // device is supported
+      case 126:
+        if (_mounted) {
+          setState(() {
+            _supported = true;
+            _scanStatus = '設備支持 AR 掃描';
+          });
+        }
+      case 20: // Authentication is ok
+      case 300:
+        if (_mounted) {
+          setState(() {
+            _authenticated = true;
+            _scanStatus = 'AR 掃描器已準備就緒';
+          });
+        }
+      default:
+        if (_mounted) {
+          setState(() {
+            _scanStatus = 'AR 掃描器狀態: $status';
+          });
+        }
+    }
+  }
+
+  void _onResultDelivered(Object? result) {
+    if (result == null || !_mounted) {
+      return;
+    }
+
+    if (result is! List<Object?>) {
+      return;
+    }
+
+    for (final lightMap in result) {
+      var map = lightMap as Map<Object?, Object?>;
+      if (_mounted) {
+        setState(() {
+          var id = map['deviceId'] as int;
+          if (id != _ligTagID) {
+            _ligTagID = id;
+          }
+          _center = Offset(
+              map['coordinateX'] as double, map['coordinateY'] as double);
+          _scanStatus = '檢測到 LiG Tag: $_ligTagID';
+        });
+      }
+    }
+  }
+
+  void _onChannelError(Object error) {
+    print(error);
+    if (_mounted) {
+      setState(() {
+        _scanStatus = 'AR 掃描錯誤: $error';
+      });
+    }
+  }
+
+  Future<void> _checkPermission() async {
+    final status = await Permission.camera.status;
+    if (_mounted) {
+      setState(() => _permissionStatus = status);
+    }
+  }
+
+  Future<void> _requestPermission() async {
+    final status = await Permission.camera.request();
+    if (_mounted) {
+      setState(() => _permissionStatus = status);
+    }
+
+    if (status.isGranted) {
+      _startScanning();
+    } else if (status.isDenied) {
+      _showPermissionDeniedDialog();
+    } else if (status.isPermanentlyDenied) {
+      _showOpenSettingsDialog();
+    }
+  }
+
+  void _startScanning() {
+    _ligScannerSdkPlugin.start();
+    setState(() {
+      _scanStatus = 'AR 掃描已啟動';
+    });
+  }
+
+  void _showPermissionDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('需要相機權限'),
+        content: Text('AR 掃描需要相機權限才能運作。請授予權限以繼續。'),
+        actions: [
+          TextButton(
+            child: Text('取消'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('重試'),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _requestPermission();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showOpenSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('需要相機權限'),
+        content: Text('AR 掃描需要相機權限才能運作。請在設置中授予權限。'),
+        actions: [
+          TextButton(
+            child: Text('取消'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('打開設置'),
+            onPressed: () {
+              openAppSettings();
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('AR Scanner'),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                CustomPaint(
+                  painter: CustomCirclePainter(center: _center, id: _ligTagID),
+                  child: Container(),
+                ),
+                Positioned(
+                  top: 20,
+                  left: 20,
+                  right: 20,
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    color: Colors.black.withOpacity(0.7),
+                    child: Text(
+                      _scanStatus,
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Container(
+              color: Colors.white,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    TextButton(
+                      onPressed: _requestPermission,
+                      child: const Text('請求權限並開始掃描'),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        _ligScannerSdkPlugin.stop();
+                        setState(() {
+                          _scanStatus = 'AR 掃描已停止';
+                        });
+                      },
+                      child: const Text('停止掃描'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CustomCirclePainter extends CustomPainter {
+  final Offset center;
+  final int id;
+
+  CustomCirclePainter({required this.center, required this.id});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.yellow
+      ..style = PaintingStyle.fill;
+    final point = Offset(center.dx * size.width, center.dy * size.height);
+
+    canvas.drawCircle(point, 30, paint);
+    const textStyle = TextStyle(
+      color: Colors.black,
+      fontSize: 16,
+    );
+    final textSpan = TextSpan(
+      text: '$id',
+      style: textStyle,
+    );
+    final textPainter = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout(
+      minWidth: 0,
+      maxWidth: size.width,
+    );
+    final textPoint = Offset(point.dx - 10, point.dy - 10);
+    textPainter.paint(canvas, textPoint);
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) {
+    return true;
   }
 }

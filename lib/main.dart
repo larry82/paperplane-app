@@ -661,36 +661,45 @@ class _ARScannerPageState extends State<ARScannerPage> {
   final Permission _permission = Permission.camera;
   PermissionStatus _permissionStatus = PermissionStatus.denied;
 
+  StreamSubscription? _statusSubscription;
+  StreamSubscription? _resultSubscription;
+
   @override
   void initState() {
     super.initState();
 
     _listenForPermissionStatus();
 
-    statusChannel
+    _statusSubscription = statusChannel
         .receiveBroadcastStream()
         .listen(_onStatusReported, onError: _onChannelError);
-    resultChannel
+    _resultSubscription = resultChannel
         .receiveBroadcastStream()
         .listen(_onResultDelivered, onError: _onChannelError);
 
-    _ligScannerSdkPlugin.initialize("79AA5-5F64B-2D40F-FE67B-145C3",
-        "D68E2-6ABFE-4AC12-95033-11102"); // 保留原來的 KEY
+    _ligScannerSdkPlugin.initialize(
+        "79AA5-5F64B-2D40F-FE67B-145C3", "D68E2-6ABFE-4AC12-95033-11102");
     initPlatformState();
+  }
+
+  @override
+  void dispose() {
+    _statusSubscription?.cancel();
+    _resultSubscription?.cancel();
+    super.dispose();
   }
 
   void _listenForPermissionStatus() async {
     final status = await _permission.status;
-    setState(() => _permissionStatus = status);
+    print('AR Scanner: $status');
+    if (mounted) {
+      setState(() => _permissionStatus = status);
+    }
   }
 
   void _onStatusReported(Object? status) {
     print('AR Scanner: $status');
-    if (status == null) {
-      return;
-    }
-
-    if (status is! int) {
+    if (status == null || status is! int || !mounted) {
       return;
     }
 
@@ -711,11 +720,7 @@ class _ARScannerPageState extends State<ARScannerPage> {
   }
 
   void _onResultDelivered(Object? result) {
-    if (result == null) {
-      return;
-    }
-
-    if (result is! List<Object?>) {
+    if (result == null || result is! List<Object?> || !mounted) {
       return;
     }
 
@@ -776,8 +781,13 @@ class _ARScannerPageState extends State<ARScannerPage> {
                     children: <Widget>[
                       TextButton(
                         onPressed: () async {
+                          // Log current permission status
+                          print(
+                              'Current camera permission status: $_permissionStatus');
                           final status = await _permission.request();
                           setState(() => _permissionStatus = status);
+                          // Log updated permission status
+                          print('Updated camera permission status: $status');
                         },
                         child: const Text('Request Permission'),
                       ),
@@ -785,12 +795,22 @@ class _ARScannerPageState extends State<ARScannerPage> {
                         onPressed: () async {
                           if (_permissionStatus.isGranted) {
                             _ligScannerSdkPlugin.start();
+                            print('AR 掃描器已啟動');
                           } else {
+                            print('當前相機權限狀態: $_permissionStatus');
                             final status = await _permission.request();
                             setState(() => _permissionStatus = status);
+                            print('更新後的相機權限狀態: $status');
+
+                            if (status.isGranted) {
+                              _ligScannerSdkPlugin.start();
+                              print('權限已獲取，AR 掃描器已啟動');
+                            } else {
+                              print('無法獲取相機權限，AR 掃描器無法啟動');
+                            }
                           }
                         },
-                        child: const Text('Start'),
+                        child: const Text('開始'),
                       ),
                       TextButton(
                         onPressed: () async {

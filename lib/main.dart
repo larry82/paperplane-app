@@ -143,35 +143,22 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: FutureBuilder(
-        future: Provider.of<AppState>(context, listen: false).loadAppState(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
-            return AppRouter();
-          }
-          return CircularProgressIndicator();
-        },
-      ),
+      home: LoginPage(),
     );
   }
 }
 
-class AppRouter extends StatelessWidget {
+class LoginPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final appState = Provider.of<AppState>(context);
-    final userState = Provider.of<UserState>(context);
-
-    if (!userState.isLoggedIn) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _signIn(context);
-      });
-      return LoginPage();
-    } else if (!appState.tutorialCompleted) {
-      return TutorialPage();
-    } else {
-      return MainScreen();
-    }
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          child: Text('LINE 登入'),
+          onPressed: () => _signIn(context),
+        ),
+      ),
+    );
   }
 
   void _signIn(BuildContext context) async {
@@ -187,155 +174,13 @@ class AppRouter extends StatelessWidget {
       Provider.of<AppState>(context, listen: false).setFirstLaunch(false);
       Provider.of<AppState>(context, listen: false).saveAppState();
 
-      if (Provider.of<AppState>(context, listen: false).tutorialCompleted) {
-        Navigator.of(context)
-            .pushReplacement(MaterialPageRoute(builder: (_) => MainScreen()));
-      } else {
-        Navigator.of(context)
-            .pushReplacement(MaterialPageRoute(builder: (_) => TutorialPage()));
-      }
+      Navigator.of(context)
+          .pushReplacement(MaterialPageRoute(builder: (_) => MainScreen()));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('登入失敗: $e')),
       );
     }
-  }
-}
-
-class LoginPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('正在登入...'),
-            SizedBox(height: 20),
-            CircularProgressIndicator(),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class TutorialPage extends StatefulWidget {
-  @override
-  _TutorialPageState createState() => _TutorialPageState();
-}
-
-class _TutorialPageState extends State<TutorialPage> {
-  final PageController _pageController = PageController();
-  int _currentPage = 0;
-
-  List<Widget> _tutorialPages = [
-    TutorialPageContent(
-      title: "歡迎使用酒吧指南",
-      content: "這是一個幫助你找到最好酒吧的應用程式。",
-      image: Icons.local_bar,
-    ),
-    TutorialPageContent(
-      title: "探索附近的酒吧",
-      content: "使用地圖功能找到你附近的酒吧。",
-      image: Icons.map,
-    ),
-    TutorialPageContent(
-      title: "AR 體驗",
-      content: "使用 AR 功能探索酒吧的特別優惠。",
-      image: Icons.view_in_ar,
-    ),
-    TutorialPageContent(
-      title: "開始你的酒吧之旅",
-      content: "準備好了嗎？讓我們開始探索吧！",
-      image: Icons.celebration,
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          PageView(
-            controller: _pageController,
-            onPageChanged: (int page) {
-              setState(() {
-                _currentPage = page;
-              });
-            },
-            children: _tutorialPages,
-          ),
-          Positioned(
-            bottom: 50,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                _tutorialPages.length,
-                (index) => Container(
-                  margin: EdgeInsets.symmetric(horizontal: 5),
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _currentPage == index ? Colors.blue : Colors.grey,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (_currentPage == _tutorialPages.length - 1)
-            Positioned(
-              bottom: 20,
-              right: 20,
-              child: ElevatedButton(
-                child: Text('開始使用'),
-                onPressed: () {
-                  Provider.of<AppState>(context, listen: false)
-                      .setTutorialCompleted(true);
-                  Provider.of<AppState>(context, listen: false).saveAppState();
-                  Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => MainScreen()));
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class TutorialPageContent extends StatelessWidget {
-  final String title;
-  final String content;
-  final IconData image;
-
-  const TutorialPageContent({
-    Key? key,
-    required this.title,
-    required this.content,
-    required this.image,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(40.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(image, size: 100, color: Colors.blue),
-          SizedBox(height: 40),
-          Text(title, style: Theme.of(context).textTheme.titleLarge),
-          SizedBox(height: 20),
-          Text(content,
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center),
-        ],
-      ),
-    );
   }
 }
 
@@ -355,9 +200,7 @@ class _MainScreenState extends State<MainScreen> {
       body: IndexedStack(
         index: _selectedIndex,
         children: [
-          WebViewPage(
-            initialUrl: 'https://flyingclub.io/webview/auth',
-          ),
+          WebViewPage(),
           ARScannerPage(),
           ProfilePage(),
         ],
@@ -389,10 +232,6 @@ class _MainScreenState extends State<MainScreen> {
 }
 
 class WebViewPage extends StatefulWidget {
-  final String initialUrl;
-
-  WebViewPage({required this.initialUrl});
-
   @override
   _WebViewPageState createState() => _WebViewPageState();
 }
@@ -400,11 +239,15 @@ class WebViewPage extends StatefulWidget {
 class _WebViewPageState extends State<WebViewPage> {
   late WebViewController _controller;
   bool _isLoading = true;
-  bool _hasCompletedAuth = false;
+  bool _isDataInjected = false;
 
   @override
   void initState() {
     super.initState();
+    _initializeWebView();
+  }
+
+  void _initializeWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
@@ -422,21 +265,19 @@ class _WebViewPageState extends State<WebViewPage> {
             setState(() {
               _isLoading = false;
             });
-            _injectUserData();
-            if (!_hasCompletedAuth &&
-                url.contains('flyingclub.io/webview/auth')) {
-              _hasCompletedAuth = true;
-              _navigateToGuide();
+            if (!_isDataInjected) {
+              _injectUserData();
             }
           },
         ),
       )
-      ..loadRequest(Uri.parse(widget.initialUrl));
+      ..loadRequest(Uri.parse('https://flyingclub.io/webview/auth'));
   }
 
   void _injectUserData() {
     final userState = Provider.of<UserState>(context, listen: false);
     final appState = Provider.of<AppState>(context, listen: false);
+
     if (userState.isLoggedIn && userState.accessToken != null) {
       final accessToken = userState.accessToken!.data['access_token'] as String;
       final name = userState.userProfile?.displayName ?? '';
@@ -448,11 +289,30 @@ class _WebViewPageState extends State<WebViewPage> {
         window.localStorage.setItem('line_name', '$name');
         window.localStorage.setItem('line_email', '$email');
         window.localStorage.setItem('line_user_id', '$userId');
+        if (window.onUserDataInjected) {
+          window.onUserDataInjected();
+        }
       ''';
+
       _controller.runJavaScript(script).then((_) {
         print('User data injected successfully');
+        setState(() {
+          _isDataInjected = true;
+          _isLoading = true; // 重新設置加載狀態
+        });
+        // 重新載入 auth 頁面
+        _controller
+            .loadRequest(Uri.parse('https://flyingclub.io/webview/auth'));
       }).catchError((error) {
         print('Error injecting user data: $error');
+        setState(() {
+          _isLoading = false;
+        });
+        // 可以在這裡添加錯誤處理邏輯
+      });
+    } else {
+      setState(() {
+        _isLoading = false;
       });
     }
 
@@ -469,18 +329,24 @@ class _WebViewPageState extends State<WebViewPage> {
         .pushReplacement(MaterialPageRoute(builder: (_) => LoginPage()));
   }
 
-  void _navigateToGuide() {
-    _controller
-        .loadRequest(Uri.parse('https://flyingclub.io/stores?guide=true'));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text('WebView'),
       ),
-      body: WebViewWidget(controller: _controller),
+      body: Stack(
+        children: [
+          WebViewWidget(controller: _controller),
+          if (_isLoading)
+            Container(
+              color: Colors.white,
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
